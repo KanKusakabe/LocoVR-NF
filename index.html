@@ -263,6 +263,25 @@
 </script>
 </section>
 
+<section><h2>デモの限界 — ローカルの本体と、ブラウザ実装で諦めた/工夫した点</h2>
+<p class="lead">上のデモは<b>本物の学習済み重み</b>(C3 StepFlow・C1 AffordanceFlow を JS 移植、PyTorch と誤差 1e-6/9e-6 で照合)で動きますが、<b>静的な1枚の HTML</b> という制約から、ローカルの Python 本体に対して割り切った点があります。研究の主張・定量は<b>ローカル(Python)側が本体</b>で、デモは挙動を触って理解するための窓、という位置づけです。</p>
+<p class="obs"><b>ローカル(Python)で成立していること(=図が示す本体)</b></p>
+<ul>
+<li><b>C3 再設計シミュレーション</b>:目的地条件の軌跡分布を生成し、実測の4レイアウトと照合(<b>minADE 0.39m &lt; A* 0.68m &lt; 直線 0.81m</b>)。家具を差し替えると分布が再ルーティング。→ 上の <b>C3 の図</b>(<code>results/c3_redesign.png</code>)。</li>
+<li><b>C5 家具配置最適化</b>:回転込みで N 個を同時最適化し、<b>動線妨害 26.7%→14.9%(44%減)</b>。→ 上の <b>C5 の図</b>(<code>results/c5_optimize.png</code>)。</li>
+<li>131住宅での学習・未知住宅評価・全ゲートの数値検証(<code>results/c2_*</code>)。</li>
+</ul>
+<p class="obs"><b>ブラウザ実装で「できなかった/工夫が必要だった」例</b></p>
+<ul>
+<li><b>① 学習済みフローを ONNX/TF.js でそのまま出せない</b>:自己回帰の有理二次スプライン流は<b>逆写像(サンプリング)</b>がグラフ化しにくい。→ CropCNN+NSF を<b>手で JS 移植</b>し PyTorch と数値照合(工数大)。</li>
+<li><b>② モデル単体はほぼ操舵しない(最本質の限界)</b>:学習ステップは<b>前進バイアスが強い</b>(fwd≈0.29 に対し横 lat≈±0.07)。人は目標を向いて歩くので、モデルは「どこで曲がるか」の大域制御をほとんど学んでいない。→ <b>純粋なモデル任せのロールアウトはゴールに到達しない</b>。外側に<b>目的地コントローラ</b>(ヘディングをゴールへ向け・家具を迂回)を置く必要があり、デモの経路は「<b>モデル=局所の歩き方 / コントローラ=大域の向き</b>」のハイブリッド。「操舵まで完全にモデル任せ」にするには C3 の再設計・再学習が要る。</li>
+<li><b>③ ブラウザの推論が ~10倍遅い</b>:CNN 1回が実機 ~2ms に対しプレビュー環境 ~22ms。K本×数十ステップで数秒〜数十秒。→ <code>setTimeout</code> ストリーミング(背景タブで <code>requestAnimationFrame</code> が止まる問題も回避)、ドラッグ中は軽量な代理でプレビュー。</li>
+<li><b>④ 最適化目的のゲーム化</b>:アフォーダンスモデルは「人は<b>壁際・家具際</b>に居る」と学習しているため、配置後の密度を素朴に最大化すると<b>家具で部屋を囲んで密度を水増し</b>する退化が起きた。→ 空室の traffic 場を<b>固定コスト</b>に使い非ゲーム化(<code>optimize.py</code>・デモとも同方針)。</li>
+<li><b>⑤ デモの最適化は位置のみ(軸並行)</b>:ローカル <code>optimize.py</code> は回転込み。デモは家具表現を軸並行に保つため位置最適化に限定。</li>
+<li><b>⑥ 部屋・家具はユーザが描く矩形</b>:モデルと foot-traffic 場は本物だが、間取りは HM3D 実スキャンでなく合成。実住宅での定量は <code>results/</code> が担う。</li>
+</ul>
+<p class="so"><b>まとめ</b>:デモは<b>本物の重みを厳密に(1e-6)実行</b>しているが、<b>操舵は外側のコントローラ</b>が担い、部屋は合成・最適化は位置のみ、という割り切りがある。<b>「学べたこと」と「まだ学べていないこと(大域操舵)」の両方が、このデモに正直に表れている</b>——素朴な予測モデルは大域の逆設計に使えない、という Layout-NF からの教訓の、手で触れる実例。</p></section>
+
 <section><h2>正直な限界 と 次の一手</h2>
 <ul>
 <li><b>LocoVR は VR</b>:実歩行と微差の可能性(衝突リスク無し等)。→ <b>C4</b>(LocoReal 物理レイアウトを VR 学習モデルの物理テストセットに)で担保する設計(未着手)。</li>
@@ -271,5 +290,5 @@
 <li>継続保持:<b>THÖR-MAGNI</b>(同一室の因果検証 B8)・<b>TRUMANS</b>(滞在主体データの対照)。</li>
 </ul></section>
 
-<p class="sub"><code>uv run --no-project python -m locovrnf.{fetch,coordcheck,affordance,register,crossspace,traj}</code> で再現。データ入手は README 参照(LocoVR/LocoReal・MIT)。KAN-NF ハブ:<a href="https://kankusakabe.github.io/KAN-NF/">kankusakabe.github.io/KAN-NF</a></p>
+<p class="sub"><code>uv run --no-project python -m locovrnf.{fetch,coordcheck,affordance,register,crossspace,traj,optimize}</code> で再現。デモの重みは <code>locovrnf.export_web</code> で書き出し、<code>node webdemo/stepflow.js</code> で PyTorch 一致を検証。データ入手は README 参照(LocoVR/LocoReal・MIT)。KAN-NF ハブ:<a href="https://kankusakabe.github.io/KAN-NF/">kankusakabe.github.io/KAN-NF</a></p>
 </body></html>

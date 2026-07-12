@@ -1,0 +1,30 @@
+{
+  "layouts": {
+    "000": {
+      "n_traj": 103,
+      "n_samples": 48947,
+      "frac_on_free": 0.999,
+      "occ_dark_frac": 0.7393
+    },
+    "001": {
+      "n_traj": 97,
+      "n_samples": 44820,
+      "frac_on_free": 0.9977,
+      "occ_dark_frac": 0.7414
+    },
+    "002": {
+      "n_traj": 117,
+      "n_samples": 68597,
+      "frac_on_free": 0.9999,
+      "occ_dark_frac": 0.7419
+    },
+    "003": {
+      "n_traj": 110,
+      "n_samples": 49949,
+      "frac_on_free": 0.9972,
+      "occ_dark_frac": 0.7415
+    }
+  },
+  "mean_frac_on_free": 0.9984,
+  "gate_pass": true
+}

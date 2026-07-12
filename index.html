@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="ja"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LocoVR-NF · 実住宅の導線尤度で家具配置を採点し再設計をシミュレートする</title>
+<style>
+ body{font:16px/1.75 -apple-system,"Hiragino Sans","Noto Sans JP",sans-serif;max-width:960px;margin:2rem auto;padding:0 1rem;color:#222}
+ h1{line-height:1.35;margin-bottom:.2rem} .sub{color:#666}
+ .kpis{display:flex;gap:1rem;flex-wrap:wrap;margin:1.4rem 0}
+ .kpi{background:#f5f3f0;border-radius:12px;padding:1rem 1.3rem;min-width:150px} .kpi b{display:block;font-size:1.6rem;color:#c2410c}
+ section{margin:2.3rem 0} img{width:100%;border:1px solid #e5e5e5;border-radius:10px}
+ .obs{color:#333;margin:.5rem 0 .2rem}
+ .so{color:#444;background:#faf8f5;border-left:3px solid #d97757;padding:.6rem .9rem;border-radius:0 8px 8px 0}
+ code{background:#f0eee9;padding:.1rem .3rem;border-radius:4px} .lead{background:#f7f5f2;border-radius:12px;padding:1rem 1.2rem}
+ .warn{background:#fff7ed;border-left:3px solid #ea9a4f}
+ ul{margin:.3rem 0}
+</style></head><body>
+<h1>LocoVR-NF — 実住宅の導線尤度で「家具配置」を採点し、再設計をシミュレートする</h1>
+<p class="sub"><b>実データ</b> LocoVR / LocoReal(ICLR 2025・MIT。実人間の目的志向歩行 × 実住宅)で、<a href="https://kankusakabe.github.io/Layout-NF/">Layout-NF</a>(TRUMANS 合成室)の主張を置き換え・拡張。<code>p(居場所 ｜ 局所占有)</code> と <code>p(経路 ｜ レイアウト,start,goal)</code> を条件付き Normalizing Flow で学習し、<b>厳密尤度を設計の目的関数にする</b>。</p>
+<div class="kpis">
+<div class="kpi"><b>99.8%</b>C0 実軌跡が非占有セル上(座標整合・1=完全)</div>
+<div class="kpi"><b>0.77</b>C1 実家具 vs free 検出 AUC(0.5=偶然/1=完璧)</div>
+<div class="kpi"><b>131</b>C2 汎化に使った実住宅数(未知31住宅で評価)</div>
+<div class="kpi"><b>0.39m</b>C3 生成経路の minADE(A* 0.68m・直線 0.81m より小)</div></div>
+<p class="lead"><b>要旨</b>：Layout-NF は合成データ(TRUMANS)で家具配置を採点・逆設計するデモだった。本トラックはこれを<b>実データ</b>で検証する。<b>C0/C1</b> 実キャンパス室(家具4配置)で、学習した居場所密度が<b>実家具を低アフォーダンスと当て</b>(AUC 0.77)、家具化したセルの<b>実訪問密度は69倍落ちる</b>(合成A2の実データ再現)。<b>C2</b> <b>131の実住宅</b>で学び、<b>未知住宅でも密度は劣化せず</b>(held-out NLL −0.43 ≈ in-dist −0.40)、家具検出AUCは住宅数とともに<b>0.65→0.87 と上昇</b>。<b>C3</b> 定式化を<b>目的地条件の軌跡フロー</b>に変え、家具を動かすと<b>動線分布がどう引き直されるか</b>を実測の4レイアウトで検証(生成分布 minADE 0.39m、A*・直線を上回る)。各図に<b>観察</b>と<b>解釈</b>を併記し、効かなかった手(per-step 尤度ランキング)も正直に記録する。</p>
+
+<section><h2>元データ(何が入っているか)</h2>
+<p class="lead"><b>LocoReal</b>=実キャンパス室で<b>家具配置を4通り</b>に変えた物理MoCap(5人・430軌跡)。<b>LocoVR</b>=<b>131の異なる実住宅</b>(HM3Dスキャン)の目的志向VR歩行(7000+軌跡)。各軌跡=<code>{時刻, ゴール(3D), シーンID, p1, p2}</code>、各人物=部位ごとの <code>{pos:(T,3) 世界m, pose}</code>。占有 <code>binary_map</code>(1024²・黒=家具/壁・白=歩行可能)。<b>p1</b>(目的志向の歩行者)を使い、p2 は静的レイアウト問題では動的要因として無視。1px≈0.98cm(TRUMANS 2cm より高精細)。</p></section>
+
+<section><h2>C0 · 座標整合:実軌跡は占有マップの上に正しく乗り、家具を避けるか</h2><img src="results/c0_coordcheck.png" alt="c0_coordcheck">
+<p class="obs"><b>観察</b>：LocoReal 4レイアウトで p1 の腰位置(オレンジ)を占有(黒=家具/壁)に重ねると、<b>99.8%が非占有セル上</b>を走り、軌跡は家具島(黒い矩形)を明確に回り込む。4レイアウトで家具配置が異なり、軌跡の通り方もそれに応じて変わる。</p>
+<p class="so"><b>だから何が言えるか</b>：公式の座標変換 <code>px=(m+5)·1024/10</code> と占有の極性が正しく、以降の「実家具の上に人が居ない」という採点が物理的に正しい位置で効く前提が確認できた。<b>実軌跡が実家具を迂回する</b>=Layout-NF が合成摂動で示した現象の“本物版”がここにある。</p></section>
+
+<section><h2>C1 · 実家具回避の採点(合成A2の実データ版)</h2><img src="results/c1_affordance.png" alt="c1_affordance">
+<p class="obs"><b>観察</b>：(左)実占有で学習した <code>p(居場所｜占有)</code> は、<b>実家具セルの logp が free セルより低い</b>——4レイアウト全てで符号一致、AUC 0.77(val NLL −0.27 ≪ 一様1.39)。(中)4レイアウトは同じ室でピクセル整合するので、<b>あるレイアウトで家具化したセル</b>の実訪問密度を、それが空いている他レイアウトと直接比較でき、<b>69倍の低下</b>。(右)訪問密度(hot)は家具島(dark)を避けて歩行域に集中。</p>
+<p class="so"><b>だから何が言えるか</b>：Layout-NF が<b>合成の家具貼り</b>で示した配置採点は、<b>実人間・実家具・実占有でもそのまま成立</b>する。中央の69倍低下はモデルに依らないデータレベルの反実で、THÖR-MAGNI の B8(同一位置での障害物あり/なし=88倍)を<b>家具の置き換え</b>という形で再現したもの=Layout-NF の主張の実証。</p></section>
+
+<section><h2>C2 · 座標登録:131の実住宅を各自の10m地図に載せる</h2><img src="results/c2_register.png" alt="c2_register">
+<p class="obs"><b>観察</b>：LocoVR の地図は住宅ごとの10m crop で<b>世界原点が住宅ごとに異なり</b>(未記載)、LocoReal の固定変換は効かない。そこで「人は自由空間を歩く」制約からオフセットを探索すると、<b>131/131住宅を on-free 中央値100%・平均99.8%・最小92.9%で登録</b>(右=登録された実住宅の軌跡が家具を回り込む例)。</p>
+<p class="so"><b>だから何が言えるか</b>：これは C0 の LocoVR 版(座標整合)。物理制約による正当な座標登録で、131の実住宅すべてで占有条件付けが正しく効く——この後の cross-space 汎化の前提が担保できた。</p></section>
+
+<section><h2>C2 · 未知の実住宅への汎化(A4/A7 の131実住宅版)</h2><img src="results/c2_scale.png" alt="c2_scale">
+<p class="obs"><b>観察</b>：131住宅を train-pool 100 / held-out 31 に分け、訓練住宅数を 10/25/50/100 と増やす。(左)未知住宅の密度NLL(オレンジ)は in-dist(青)に<b>密着したまま −0.08→−0.43 と改善</b>し頭打ちが見えない(held-out −0.434 が in-dist −0.399 とほぼ同値、gap比1.09)。(右)未知住宅での<b>家具 vs free 検出AUCは 0.65→0.87 と住宅数で上昇し続ける</b>。</p>
+<p class="so"><b>だから何が言えるか</b>：THÖR(1室)では原理的に不可能だった「<b>知らない実空間へ効く</b>」を、131の実住宅で実証。TRUMANS A7 が「密度は多様性で改善/<b>検出は24室で早期飽和</b>」だったのに対し、<b>実住宅では検出AUCも住宅数とともに伸び続ける</b>——合成室より実住宅の多様性の方が採点器を鍛える、という実データならではのスケール則。</p></section>
+
+<section><h2>C3 · 目的地条件の軌跡生成 = 再設計シミュレーション</h2><img src="results/c3_redesign.png" alt="c3_redesign">
+<p class="obs"><b>観察</b>：定式化を <code>p(位置｜占有)</code> から <b><code>p(経路｜レイアウト,start,goal)</code></b>(自己回帰ステップフロー)に変更。(左)未知レイアウトで start→goal を64本ロールアウト(橙)すると、実経路(青)に沿って中央家具島を迂回する束になる(<b>生成分布の minADE 0.387m &lt; A* 0.679m &lt; 直線 0.809m</b>、家具重なりは直線の<b>1/3</b>)。(中・右)<b>同じ start/goal のまま家具配置を別レイアウトに差し替える</b>と、経路分布が新しい家具を避けて<b>再ルーティング</b>する。</p>
+<p class="so"><b>だから何が言えるか</b>：家具を動かすと動線がどう引き直されるかを、実測の4レイアウト(相互 ground truth)に照らして予測できる=<b>再設計シミュレーションの成立</b>。NF は「1本の最短路」でなく<b>経路の分布</b>(迷い・複数ルート)を出せるのが差別化点。生成は「フローが提案し、占有が却下する」占有認識ロールアウトで実現。</p>
+<p class="obs warn" style="margin-top:.8rem"><b>正直な負の結果(C3注記)</b>：経路全体の per-step 尤度で実経路 vs 直線を判別しようとすると<b>失敗する</b>——<b>直線の方が per-step logp が高い</b>(4.21 vs 3.22)。ステップ尤度は「ゴールへ直進」を局所最尤とするため、大域的な迂回の良し悪しを測れない。<b>局所尤度 ≠ 大域的な導線品質</b>——Layout-NF の A1/A2 の教訓(素朴な予測モデルは逆設計に使えない)がここでも再現。だから C3 の主張は per-step 尤度でなく<b>生成分布の ADE</b> に置く。</p></section>
+
+<section><h2>正直な限界 と 次の一手</h2>
+<ul>
+<li><b>LocoVR は VR</b>:実歩行と微差の可能性(衝突リスク無し等)。→ <b>C4</b>(LocoReal 物理レイアウトを VR 学習モデルの物理テストセットに)で担保する設計(未着手)。</li>
+<li><b>占有の意味</b>:binary map は家具+壁=黒(通れない障害物)。TRUMANS の「家具に近づいて使う」滞在とは逆の設定なので、両データの結論は設定差込みで述べる。</li>
+<li><b>C3 の生成</b>:ゴール直近では実人間ほど障害物を避けきれない(重なり 0.088 vs 実人間 0.005)。複数家具の同時最適化・社会的回避(p2条件化)へ拡張余地。</li>
+<li>継続保持:<b>THÖR-MAGNI</b>(同一室の因果検証 B8)・<b>TRUMANS</b>(滞在主体データの対照)。</li>
+</ul></section>
+
+<p class="sub"><code>uv run --no-project python -m locovrnf.{fetch,coordcheck,affordance,register,crossspace,traj}</code> で再現。データ入手は README 参照(LocoVR/LocoReal・MIT)。KAN-NF ハブ:<a href="https://kankusakabe.github.io/KAN-NF/">kankusakabe.github.io/KAN-NF</a></p>
+</body></html>

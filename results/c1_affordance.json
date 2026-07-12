@@ -1,0 +1,43 @@
+{
+  "n_samples": 70916,
+  "n_layouts": 4,
+  "val_nll": -0.2656,
+  "uniform_nll": 1.3863,
+  "gateA_model": {
+    "per_layout": {
+      "000": {
+        "logp_furniture_mean": -0.5087,
+        "logp_free_mean": 0.1218,
+        "furniture_lower": true,
+        "auc_free_over_furniture": 0.7883
+      },
+      "001": {
+        "logp_furniture_mean": -0.5127,
+        "logp_free_mean": -0.0283,
+        "furniture_lower": true,
+        "auc_free_over_furniture": 0.7291
+      },
+      "002": {
+        "logp_furniture_mean": -0.4133,
+        "logp_free_mean": 0.0252,
+        "furniture_lower": true,
+        "auc_free_over_furniture": 0.7356
+      },
+      "003": {
+        "logp_furniture_mean": -0.9957,
+        "logp_free_mean": -0.031,
+        "furniture_lower": true,
+        "auc_free_over_furniture": 0.8183
+      }
+    },
+    "sign_test_pass": true,
+    "auc_free_over_furniture_overall": 0.7699
+  },
+  "gateB_data": {
+    "density_free_state": 4.296459792385576e-06,
+    "density_furniture_state": 6.203922708891696e-08,
+    "drop_ratio": 69.25,
+    "n_varying_cells": 174703
+  },
+  "gate_pass": true
+}

@@ -1,0 +1,20 @@
+{
+  "holdout_layout": 3,
+  "n_eval": 60,
+  "minADE_nf_m": 0.387,
+  "ADE_straightline_m": 0.809,
+  "ADE_astar_m": 0.679,
+  "path_occ_overlap_nf": 0.0879,
+  "path_occ_overlap_straightline": 0.2686,
+  "path_occ_overlap_real": 0.005,
+  "logp_real_route": 3.215,
+  "logp_straightline_route": 4.209,
+  "logp_astar_route": 2.908,
+  "real_route_most_likely_frac": 0.15,
+  "val_nll": -4.0059,
+  "gate_beats_straightline_ade": true,
+  "gate_beats_astar_ade": true,
+  "gate_avoids_furniture": true,
+  "note_stepwise_logp_favours_straightline": true,
+  "gate_pass": true
+}

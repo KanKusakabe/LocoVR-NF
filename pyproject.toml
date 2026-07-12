@@ -1,0 +1,12 @@
+[project]
+name = "locovr-nf"
+version = "0.1.0"
+description = "Conditional Normalizing-Flow spatial-affordance density on LocoVR/LocoReal (real homes) for furniture-layout scoring, cross-space generalization, and goal-conditioned re-routing simulation."
+requires-python = ">=3.11"
+dependencies = [
+    "torch>=2.2", "zuko>=1.4", "numpy>=1.26",
+    "scipy>=1.11", "matplotlib>=3.8",
+]
+
+[tool.uv]
+package = false

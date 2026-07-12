@@ -1,0 +1,8 @@
+# LocoVR/LocoReal data (MIT, re-downloadable via locovrnf.fetch)
+data/
+__pycache__/
+*.pyc
+.venv/
+.DS_Store
+# keep results/*.png + *.json so the repo is self-showing; drop heavy weights
+results/ckpt/

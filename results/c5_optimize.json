@@ -1,0 +1,42 @@
+{
+  "pieces": [
+    "sofa",
+    "table",
+    "cabinet",
+    "chair"
+  ],
+  "room_m": [
+    4.4,
+    3.2
+  ],
+  "n_cells": 1230,
+  "disruption_naive_pct": 26.712,
+  "disruption_optimized_pct": 14.899,
+  "reduction_pct": 44.2,
+  "placement": [
+    {
+      "piece": "sofa",
+      "cx": -1.35,
+      "cy": -0.75,
+      "deg": 130.9
+    },
+    {
+      "piece": "table",
+      "cx": -1.625,
+      "cy": 1.025,
+      "deg": 32.8
+    },
+    {
+      "piece": "cabinet",
+      "cx": 1.619,
+      "cy": 1.1,
+      "deg": 128.8
+    },
+    {
+      "piece": "chair",
+      "cx": -0.033,
+      "cy": 1.325,
+      "deg": 87.9
+    }
+  ]
+}

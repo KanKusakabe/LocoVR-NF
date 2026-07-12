@@ -47,6 +47,153 @@
 <p class="so"><b>だから何が言えるか</b>：家具を動かすと動線がどう引き直されるかを、実測の4レイアウト(相互 ground truth)に照らして予測できる=<b>再設計シミュレーションの成立</b>。NF は「1本の最短路」でなく<b>経路の分布</b>(迷い・複数ルート)を出せるのが差別化点。生成は「フローが提案し、占有が却下する」占有認識ロールアウトで実現。</p>
 <p class="obs warn" style="margin-top:.8rem"><b>正直な負の結果(C3注記)</b>：経路全体の per-step 尤度で実経路 vs 直線を判別しようとすると<b>失敗する</b>——<b>直線の方が per-step logp が高い</b>(4.21 vs 3.22)。ステップ尤度は「ゴールへ直進」を局所最尤とするため、大域的な迂回の良し悪しを測れない。<b>局所尤度 ≠ 大域的な導線品質</b>——Layout-NF の A1/A2 の教訓(素朴な予測モデルは逆設計に使えない)がここでも再現。だから C3 の主張は per-step 尤度でなく<b>生成分布の ADE</b> に置く。</p></section>
 
+<section><h2>▶ インタラクティブ・デモ:家具を動かして動線を引き直す</h2>
+<p class="obs"><b>使い方</b>:<b>家具</b>(灰ブロック)をドラッグで移動、角をドラッグでリサイズ、ダブルクリックで削除。<b>緑=スタート / 赤=ゴール</b>をドラッグ。<b>部屋枠</b>の角をドラッグでサイズ変更。動かすたびに、start→goal の<b>経路分布(橙)がその場で再ルーティング</b>します。</p>
+<div id="sim-wrap" style="border:1px solid #e5e5e5;border-radius:10px;overflow:hidden;background:#fff">
+ <div style="display:flex;gap:.6rem;flex-wrap:wrap;align-items:center;padding:.6rem .8rem;background:#faf8f5;border-bottom:1px solid #eee">
+  <button id="sim-add" style="cursor:pointer;border:1px solid #d6d0c8;background:#fff;border-radius:8px;padding:.35rem .7rem">＋ 家具を追加</button>
+  <button id="sim-clear" style="cursor:pointer;border:1px solid #d6d0c8;background:#fff;border-radius:8px;padding:.35rem .7rem">家具を全消去</button>
+  <button id="sim-reroll" style="cursor:pointer;border:1px solid #d6d0c8;background:#fff;border-radius:8px;padding:.35rem .7rem">↻ 経路を再生成</button>
+  <label style="font-size:.9rem;color:#555">経路数 <span id="sim-klab">40</span>
+   <input id="sim-k" type="range" min="8" max="120" value="40" style="vertical-align:middle;width:120px"></label>
+  <label style="font-size:.9rem;color:#555">迷いの幅 <span id="sim-tlab">0.7</span>
+   <input id="sim-t" type="range" min="20" max="130" value="70" style="vertical-align:middle;width:110px"></label>
+  <span id="sim-stat" style="font-size:.85rem;color:#777;margin-left:auto"></span>
+ </div>
+ <canvas id="sim" width="720" height="470" style="display:block;width:100%;height:auto;touch-action:none;cursor:crosshair"></canvas>
+</div>
+<p class="so" style="margin-top:.7rem"><b>これは何か / 何でないか</b>:このブラウザ内デモは、C3 の<b>占有認識ロールアウト</b>(「フローが候補ステップを提案し、クリアランスとゴール前進で占有が却下する」)を JavaScript で再実装したものです。学習済み <code>StepFlow</code>(PyTorch/zuko)は静的ページ上で動かせないため、<b>局所ステップの提案のみ軽量な代理</b>(ゴール方位まわりの分布)に置き換えています。<b>示すのは「配置を変えると動線分布が引き直される」という再設計の挙動</b>であって、学習済み重みそのものの出力ではありません(定量は上の <code>results/c3_*</code> が本体)。</p>
+<script>
+(function(){
+ var cv=document.getElementById('sim'); if(!cv) return;
+ var ctx=cv.getContext('2d'); var W=cv.width, H=cv.height;
+ var CELL=6, GW=Math.floor(W/CELL), GH=Math.floor(H/CELL);
+ var occ=new Uint8Array(GW*GH), clr=new Float32Array(GW*GH);
+ // state
+ var room={x0:70,y0:45,x1:W-60,y1:H-40};
+ var furn=[{x:250,y:150,w:150,h:60},{x:430,y:250,w:70,h:130},{x:150,y:300,w:110,h:55}];
+ var start={x:110,y:H-90}, goal={x:W-100,y:90};
+ var K=40, SPREAD=0.7, routes=[];
+ // ---- occupancy grid + chamfer distance transform (clearance) ----
+ function inFurn(px,py){for(var i=0;i<furn.length;i++){var f=furn[i];if(px>=f.x&&px<=f.x+f.w&&py>=f.y&&py<=f.y+f.h)return true;}return false;}
+ function buildGrid(){
+  for(var gy=0;gy<GH;gy++)for(var gx=0;gx<GW;gx++){
+   var px=gx*CELL+CELL/2, py=gy*CELL+CELL/2;
+   var o=(px<room.x0||px>room.x1||py<room.y0||py>room.y1||inFurn(px,py))?1:0;
+   occ[gy*GW+gx]=o;
+  }
+  var BIG=1e5;
+  for(var i=0;i<GW*GH;i++)clr[i]=occ[i]?0:BIG;
+  // forward pass
+  for(var gy=0;gy<GH;gy++)for(var gx=0;gx<GW;gx++){var i=gy*GW+gx;var v=clr[i];
+   if(gx>0)v=Math.min(v,clr[i-1]+1); if(gy>0)v=Math.min(v,clr[i-GW]+1);
+   if(gx>0&&gy>0)v=Math.min(v,clr[i-GW-1]+1.414); if(gx<GW-1&&gy>0)v=Math.min(v,clr[i-GW+1]+1.414);
+   clr[i]=v;}
+  // backward pass
+  for(var gy=GH-1;gy>=0;gy--)for(var gx=GW-1;gx>=0;gx--){var i=gy*GW+gx;var v=clr[i];
+   if(gx<GW-1)v=Math.min(v,clr[i+1]+1); if(gy<GH-1)v=Math.min(v,clr[i+GW]+1);
+   if(gx<GW-1&&gy<GH-1)v=Math.min(v,clr[i+GW+1]+1.414); if(gx>0&&gy<GH-1)v=Math.min(v,clr[i+GW-1]+1.414);
+   clr[i]=v;}
+ }
+ function clrAt(px,py){var gx=Math.floor(px/CELL),gy=Math.floor(py/CELL);
+  if(gx<0||gy<0||gx>=GW||gy>=GH)return 0; return clr[gy*GW+gx]*CELL;}
+ // ---- occupancy-aware rollout (JS port of locovrnf.traj.rollout) ----
+ var STEP=9, NCAND=14, MARGIN=9, GOALR=13, MAXS=240, STALLMAX=18;
+ function rand(){return Math.random();}
+ function rollout(){
+  buildGrid(); var out=[]; var gx=goal.x, gy=goal.y;
+  for(var r=0;r<K;r++){
+   var px=start.x, py=start.y, heading=Math.atan2(gy-py,gx-px);
+   var path=[[px,py]], stall=0;
+   for(var s=0;s<MAXS;s++){
+    var d0=Math.hypot(gx-px,gy-py); if(d0<GOALR)break;
+    var goalB=Math.atan2(gy-py,gx-px);
+    var bestGood=null,bestGoodW=-1, bestAcc=null,bestAccTurn=9, bestAny=null,bestAnyClr=-1, wsum=0, picks=[];
+    for(var c=0;c<NCAND;c++){
+     var th=goalB+(rand()*2-1)*(2.6*SPREAD+0.25);       // wide fan around goal bearing
+     var lx=px+Math.cos(th)*STEP, ly=py+Math.sin(th)*STEP;
+     var mx=px+Math.cos(th)*STEP*0.5, my=py+Math.sin(th)*STEP*0.5;
+     var cl=Math.min(clrAt(lx,ly),clrAt(mx,my));
+     var prog=d0-Math.hypot(gx-lx,gy-ly);
+     if(cl>bestAnyClr){bestAnyClr=cl;bestAny=[lx,ly,th];}
+     if(cl>=MARGIN){
+      var turn=Math.abs(Math.atan2(Math.sin(th-heading),Math.cos(th-heading)));
+      if(turn<bestAccTurn){bestAccTurn=turn;bestAcc=[lx,ly,th];}
+      if(prog>0){var w=Math.exp(prog*0.5);picks.push([w,lx,ly,th]);wsum+=w;}
+     }
+    }
+    var nx,ny,nth;
+    if(picks.length){var t=rand()*wsum,acc=0,ch=picks[0];for(var k=0;k<picks.length;k++){acc+=picks[k][0];if(acc>=t){ch=picks[k];break;}}nx=ch[1];ny=ch[2];nth=ch[3];}
+    else if(bestAcc){nx=bestAcc[0];ny=bestAcc[1];nth=bestAcc[2];}
+    else{nx=bestAny[0];ny=bestAny[1];nth=bestAny[2];}
+    var moved=Math.hypot(nx-px,ny-py); stall=(d0-Math.hypot(gx-nx,gy-ny)<0.4)?stall+1:0;
+    px=nx;py=ny;heading=nth;path.push([px,py]);
+    if(stall>=STALLMAX)break;
+   }
+   out.push(path);
+  }
+  return out;
+ }
+ // ---- render ----
+ function draw(){
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle='#efeae3'; ctx.fillRect(0,0,W,H);                  // outside (wall) region
+  ctx.fillStyle='#ffffff'; ctx.fillRect(room.x0,room.y0,room.x1-room.x0,room.y1-room.y0);
+  ctx.strokeStyle='#8a8175'; ctx.lineWidth=3; ctx.strokeRect(room.x0,room.y0,room.x1-room.x0,room.y1-room.y0);
+  // routes
+  ctx.strokeStyle='rgba(194,65,12,0.16)'; ctx.lineWidth=1.4; ctx.lineJoin='round';
+  for(var r=0;r<routes.length;r++){var p=routes[r];if(p.length<2)continue;ctx.beginPath();ctx.moveTo(p[0][0],p[0][1]);for(var i=1;i<p.length;i++)ctx.lineTo(p[i][0],p[i][1]);ctx.stroke();}
+  // furniture
+  for(var i=0;i<furn.length;i++){var f=furn[i];
+   ctx.fillStyle='#3f3a34'; ctx.fillRect(f.x,f.y,f.w,f.h);
+   ctx.fillStyle='#c9c2b8'; ctx.fillRect(f.x+f.w-9,f.y+f.h-9,9,9);}   // resize handle
+  // start/goal
+  ctx.fillStyle='#16a34a'; ctx.beginPath(); ctx.arc(start.x,start.y,9,0,7); ctx.fill();
+  ctx.fillStyle='#dc2626'; ctx.beginPath(); ctx.arc(goal.x,goal.y,9,0,7); ctx.fill();
+  ctx.fillStyle='#fff'; ctx.font='bold 11px sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.fillText('S',start.x,start.y); ctx.fillText('G',goal.x,goal.y);
+ }
+ function recompute(){var t0=performance.now();routes=rollout();draw();
+  var reach=0;for(var r=0;r<routes.length;r++){var p=routes[r][routes[r].length-1];if(Math.hypot(goal.x-p[0],goal.y-p[1])<GOALR+STEP)reach++;}
+  document.getElementById('sim-stat').textContent=K+'本 · '+Math.round(100*reach/Math.max(K,1))+'%がゴール到達 · '+Math.round(performance.now()-t0)+'ms';}
+ // ---- interaction ----
+ function pos(e){var r=cv.getBoundingClientRect();var sx=cv.width/r.width,sy=cv.height/r.height;var t=e.touches?e.touches[0]:e;return{x:(t.clientX-r.left)*sx,y:(t.clientY-r.top)*sy};}
+ var drag=null;
+ function hit(p){
+  if(Math.hypot(p.x-start.x,p.y-start.y)<13)return{t:'start'};
+  if(Math.hypot(p.x-goal.x,p.y-goal.y)<13)return{t:'goal'};
+  var C=[['x0','y0'],['x1','y0'],['x0','y1'],['x1','y1']];
+  for(var i=0;i<4;i++){if(Math.hypot(p.x-room[C[i][0]],p.y-room[C[i][1]])<11)return{t:'room',cx:C[i][0],cy:C[i][1]};}
+  for(var j=furn.length-1;j>=0;j--){var f=furn[j];
+   if(p.x>=f.x+f.w-11&&p.x<=f.x+f.w+2&&p.y>=f.y+f.h-11&&p.y<=f.y+f.h+2)return{t:'fsize',i:j};
+   if(p.x>=f.x&&p.x<=f.x+f.w&&p.y>=f.y&&p.y<=f.y+f.h)return{t:'fmove',i:j,dx:p.x-f.x,dy:p.y-f.y};}
+  return null;
+ }
+ function down(e){e.preventDefault();var p=pos(e);drag=hit(p);}
+ function move(e){if(!drag)return;e.preventDefault();var p=pos(e);
+  var minx=room.x0+4,maxx=room.x1-4,miny=room.y0+4,maxy=room.y1-4;
+  if(drag.t=='start'){start.x=Math.max(minx,Math.min(maxx,p.x));start.y=Math.max(miny,Math.min(maxy,p.y));}
+  else if(drag.t=='goal'){goal.x=Math.max(minx,Math.min(maxx,p.x));goal.y=Math.max(miny,Math.min(maxy,p.y));}
+  else if(drag.t=='room'){room[drag.cx]=Math.max(10,Math.min(W-10,p.x));room[drag.cy]=Math.max(10,Math.min(H-10,p.y));
+   if(room.x1-room.x0<120)room.x1=room.x0+120; if(room.y1-room.y0<100)room.y1=room.y0+100;}
+  else if(drag.t=='fmove'){var f=furn[drag.i];f.x=p.x-drag.dx;f.y=p.y-drag.dy;}
+  else if(drag.t=='fsize'){var f=furn[drag.i];f.w=Math.max(24,p.x-f.x);f.h=Math.max(24,p.y-f.y);}
+  recompute();
+ }
+ function up(){drag=null;}
+ cv.addEventListener('mousedown',down); cv.addEventListener('mousemove',move); window.addEventListener('mouseup',up);
+ cv.addEventListener('touchstart',down,{passive:false}); cv.addEventListener('touchmove',move,{passive:false}); window.addEventListener('touchend',up);
+ cv.addEventListener('dblclick',function(e){var p=pos(e);for(var j=furn.length-1;j>=0;j--){var f=furn[j];if(p.x>=f.x&&p.x<=f.x+f.w&&p.y>=f.y&&p.y<=f.y+f.h){furn.splice(j,1);recompute();return;}}});
+ document.getElementById('sim-add').onclick=function(){furn.push({x:(room.x0+room.x1)/2-45,y:(room.y0+room.y1)/2-25,w:90,h:50});recompute();};
+ document.getElementById('sim-clear').onclick=function(){furn=[];recompute();};
+ document.getElementById('sim-reroll').onclick=function(){recompute();};
+ document.getElementById('sim-k').oninput=function(){K=+this.value;document.getElementById('sim-klab').textContent=K;recompute();};
+ document.getElementById('sim-t').oninput=function(){SPREAD=+this.value/100;document.getElementById('sim-tlab').textContent=SPREAD.toFixed(2);recompute();};
+ recompute();
+})();
+</script>
+</section>
+
 <section><h2>正直な限界 と 次の一手</h2>
 <ul>
 <li><b>LocoVR は VR</b>:実歩行と微差の可能性(衝突リスク無し等)。→ <b>C4</b>(LocoReal 物理レイアウトを VR 学習モデルの物理テストセットに)で担保する設計(未着手)。</li>

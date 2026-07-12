@@ -145,9 +145,66 @@
   StepFlow.b64u8 = b64u8;
   root.StepFlow = StepFlow;
 
+  // rational-quadratic spline knots from 23 unconstrained params (shared)
+  function rqsKnots(p, off, bins, B, slope) {
+    var ls = Math.log(slope), i;
+    var w = new Float64Array(bins), h = new Float64Array(bins), d = new Float64Array(bins - 1);
+    for (i = 0; i < bins; i++) { var v = p[off + i]; w[i] = v / (1 + Math.abs(2 * v / ls)); }
+    for (i = 0; i < bins; i++) { var v2 = p[off + bins + i]; h[i] = v2 / (1 + Math.abs(2 * v2 / ls)); }
+    for (i = 0; i < bins - 1; i++) { var v3 = p[off + 2 * bins + i]; d[i] = v3 / (1 + Math.abs(v3 / ls)); }
+    var wsm = softmax(w), hsm = softmax(h);
+    var hor = new Float64Array(bins + 1), ver = new Float64Array(bins + 1), der = new Float64Array(bins + 1);
+    var cw = 0, ch = 0; hor[0] = -B; ver[0] = -B; der[0] = 1;
+    for (i = 0; i < bins; i++) { cw += wsm[i]; ch += hsm[i]; hor[i + 1] = B * (2 * cw - 1); ver[i + 1] = B * (2 * ch - 1); der[i + 1] = Math.exp(i < bins - 1 ? d[i] : 0); }
+    return { hor: hor, ver: ver, der: der };
+  }
+
+  // Affordance flow (C1): log p(visit offset | occupancy crop). Uses the RQS
+  // FORWARD (data->latent) + jacobian for exact log-density. Same CropCNN/NSF
+  // skeleton as StepFlow; context comes straight from the CNN (no goal MLP).
+  function AffordanceFlow(json) {
+    this.cfg = json.config;
+    this.conv = json.cnn.conv.map(function (c) { return { w: b64f32(c.w), b: b64f32(c.b), Co: c.shape[0], Ci: c.shape[1] }; });
+    this.cnnLin = lin(json.cnn.lin);
+    this.tf = json.transforms.map(function (t) { return t.map(lin); });
+  }
+  AffordanceFlow.prototype.context = function (crop48) {
+    var a = conv(crop48, 1, 48, 48, this.conv[0].w, this.conv[0].b, this.conv[0].Co, true);
+    var b = conv(a.d, this.conv[1].Ci, a.H, a.W, this.conv[1].w, this.conv[1].b, this.conv[1].Co, true);
+    var c = conv(b.d, this.conv[2].Ci, b.H, b.W, this.conv[2].w, this.conv[2].b, this.conv[2].Co, true);
+    return linF(this.cnnLin, c.d, true);
+  };
+  AffordanceFlow.prototype.hyper = function (t, input) {
+    var h = linF(t[0], input, true); h = linF(t[1], h, true); return linF(t[2], h, false);
+  };
+  AffordanceFlow.prototype.rqsFwd = function (x, p, off) {   // returns [y, log|dy/dx|]
+    var bins = this.cfg.bins, B = this.cfg.bound, K = rqsKnots(p, off, bins, B, this.cfg.slope);
+    var k = 0, i; for (i = 0; i < bins + 1; i++) if (K.hor[i] < x) k++; k -= 1;
+    if (k < 0 || k >= bins) return [x, 0];
+    var x0 = K.hor[k], x1 = K.hor[k + 1], y0 = K.ver[k], y1 = K.ver[k + 1], d0 = K.der[k], d1 = K.der[k + 1];
+    var s = (y1 - y0) / (x1 - x0), z = (x - x0) / (x1 - x0), denom = s + (d0 + d1 - 2 * s) * z * (1 - z);
+    var y = y0 + (y1 - y0) * (s * z * z + d0 * z * (1 - z)) / denom;
+    var jac = s * s * (2 * s * z * (1 - z) + d0 * (1 - z) * (1 - z) + d1 * z * z) / (denom * denom);
+    return [y, Math.log(jac)];
+  };
+  AffordanceFlow.prototype.logProb = function (crop48, x) {  // x = [x0,x1]
+    var ctx = this.context(crop48), cur = [x[0], x[1]], ladj = 0, per = 23;
+    var input = new Float32Array(2 + ctx.length); input.set(ctx, 2);
+    for (var i = 0; i < this.tf.length; i++) {
+      input[0] = cur[0]; input[1] = cur[1];
+      var phi = this.hyper(this.tf[i], input), nx = [0, 0];
+      for (var j = 0; j < 2; j++) { var r = this.rqsFwd(cur[j], phi, j * per); nx[j] = r[0]; ladj += r[1]; }
+      cur = nx;
+    }
+    var LOG2PI = Math.log(2 * Math.PI);
+    return -0.5 * (cur[0] * cur[0] + cur[1] * cur[1] + 2 * LOG2PI) + ladj;
+  };
+  root.AffordanceFlow = AffordanceFlow;
+
   // ---- node self-verification against PyTorch test vectors ----
   if (typeof module !== "undefined" && module.exports) {
-    module.exports = StepFlow;
+    module.exports = { StepFlow: StepFlow, AffordanceFlow: AffordanceFlow };
+    module.exports.StepFlow = StepFlow;
     if (require.main === module) {
       var fs = require("fs"), path = require("path"), dir = __dirname;
       var w = JSON.parse(fs.readFileSync(path.join(dir, "stepflow.json")));
@@ -160,8 +217,20 @@
         var e = Math.max(Math.abs(step[0] - v.step[0]), Math.abs(step[1] - v.step[1]));
         maxErr = Math.max(maxErr, e); n++;
       });
-      console.log("verified " + n + " vectors vs PyTorch | max abs error = " + maxErr.toExponential(3));
-      process.exit(maxErr < 1e-3 ? 0 : 1);
+      console.log("StepFlow: verified " + n + " vectors vs PyTorch | max abs error = " + maxErr.toExponential(3));
+      var ok = maxErr < 1e-3;
+      if (fs.existsSync(path.join(dir, "affordance.json"))) {
+        var af = new AffordanceFlow(JSON.parse(fs.readFileSync(path.join(dir, "affordance.json"))));
+        var atv = JSON.parse(fs.readFileSync(path.join(dir, "aff_testvecs.json"))), aerr = 0;
+        atv.forEach(function (v) {
+          var u = b64u8(v.crop), crop = new Float32Array(u.length);
+          for (var i = 0; i < u.length; i++) crop[i] = u[i];
+          aerr = Math.max(aerr, Math.abs(af.logProb(crop, v.x) - v.logp));
+        });
+        console.log("AffordanceFlow: verified " + atv.length + " logp vs PyTorch | max abs error = " + aerr.toExponential(3));
+        ok = ok && aerr < 1e-3;
+      }
+      process.exit(ok ? 0 : 1);
     }
   }
 })(typeof window !== "undefined" ? window : globalThis);

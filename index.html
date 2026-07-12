@@ -58,6 +58,7 @@
   <button id="sim-add" style="cursor:pointer;border:1px solid #d6d0c8;background:#fff;border-radius:8px;padding:.35rem .7rem">＋ 家具を追加</button>
   <button id="sim-clear" style="cursor:pointer;border:1px solid #d6d0c8;background:#fff;border-radius:8px;padding:.35rem .7rem">家具を全消去</button>
   <button id="sim-reroll" style="cursor:pointer;border:1px solid #d6d0c8;background:#fff;border-radius:8px;padding:.35rem .7rem">↻ 経路を再生成</button>
+  <button id="sim-opt" style="cursor:pointer;border:1px solid #c2410c;color:#c2410c;background:#fff;border-radius:8px;padding:.35rem .7rem">✦ 家具配置を最適化</button>
   <label style="font-size:.9rem;color:#555">経路数 <span id="sim-klab">14</span>
    <input id="sim-k" type="range" min="6" max="40" value="14" style="vertical-align:middle;width:120px"></label>
   <label style="font-size:.9rem;color:#555">迷いの幅 <span id="sim-tlab">0.85</span>
@@ -204,11 +205,60 @@
  document.getElementById('sim-reroll').onclick=function(){computeReal();};
  document.getElementById('sim-k').oninput=function(){K=+this.value;document.getElementById('sim-klab').textContent=K;computeReal();};
  document.getElementById('sim-t').oninput=function(){TEMP=+this.value/100;document.getElementById('sim-tlab').textContent=TEMP.toFixed(2);computeReal();};
+ // ---- C5: furniture-layout optimization (real affordance model) ----
+ var aff=null;
+ function occWall(px,py){return (px<room.x0||px>room.x1||py<room.y0||py>room.y1)?1:0;} // walls only
+ function buildCropAff(px,py){                 // affordance training used random rotation -> yaw=0 ok
+  var P=aff.cfg.CROP_PX,half=aff.cfg.CROP_M/2,span=2*half,cr=new Float32Array(P*P);
+  for(var r=0;r<P;r++){var v=-half+span*r/(P-1);for(var c=0;c<P;c++){var u=-half+span*c/(P-1);cr[r*P+c]=occWall(px+u/MPP,py+v/MPP);}}
+  return cr;
+ }
+ function runCEM(sizes,pts,T){
+  var N=sizes.length;
+  var mean=furn.map(function(f){return [f.x+f.w/2,f.y+f.h/2];});
+  var std=mean.map(function(){return [(room.x1-room.x0)/3,(room.y1-room.y0)/3];});
+  function clip(cx,cy,w,h){return [Math.max(room.x0+w/2,Math.min(room.x1-w/2,cx)),Math.max(room.y0+h/2,Math.min(room.y1-h/2,cy))];}
+  function cost(cfg){var cnt=new Int16Array(pts.length),p,q;
+   for(p=0;p<N;p++){var cx=cfg[p][0],cy=cfg[p][1],w=sizes[p].w,h=sizes[p].h;
+    for(q=0;q<pts.length;q++)if(Math.abs(pts[q][0]-cx)<w/2&&Math.abs(pts[q][1]-cy)<h/2)cnt[q]++;}
+   var D=0,ov=0;for(q=0;q<pts.length;q++){if(cnt[q]>=1)D+=T[q];if(cnt[q]>=2)ov+=T[q];}return D+4*ov;}
+  function rn(){return Math.sqrt(-2*Math.log(Math.random()+1e-12))*Math.cos(6.283*Math.random());}
+  var best=[1e9,null];
+  for(var it=0;it<26;it++){
+   var pop=[],sc=[],s,p;
+   for(s=0;s<70;s++){var cfg=[];for(p=0;p<N;p++)cfg.push(clip(mean[p][0]+std[p][0]*rn(),mean[p][1]+std[p][1]*rn(),sizes[p].w,sizes[p].h));pop.push(cfg);sc.push(cost(cfg));}
+   var ord=sc.map(function(v,ii){return [v,ii];}).sort(function(a,b){return a[0]-b[0];});
+   if(ord[0][0]<best[0])best=[ord[0][0],pop[ord[0][1]]];
+   var EL=12;for(p=0;p<N;p++){var mx=0,my=0,e;for(e=0;e<EL;e++){var cf=pop[ord[e][1]];mx+=cf[p][0];my+=cf[p][1];}mx/=EL;my/=EL;var vx=0,vy=0;for(e=0;e<EL;e++){var cf2=pop[ord[e][1]];vx+=(cf2[p][0]-mx)*(cf2[p][0]-mx);vy+=(cf2[p][1]-my)*(cf2[p][1]-my);}mean[p]=[mx,my];std[p]=[Math.sqrt(vx/EL)+3,Math.sqrt(vy/EL)+3];}
+  }
+  for(var p2=0;p2<N;p2++){furn[p2].x=best[1][p2][0]-sizes[p2].w/2;furn[p2].y=best[1][p2][1]-sizes[p2].h/2;}
+  setStat('配置最適化 完了(アフォーダンス目的で動線妨害を最小化)· 経路を再計算');computeReal();
+ }
+ function optimizeLayout(){
+  if(!aff){setStat('アフォーダンスモデル読込中…もう一度お試しください');return;}
+  if(!furn.length){setStat('最適化する家具がありません');return;}
+  runid++;                                     // cancel any running real rollout
+  var sizes=furn.map(function(f){return {w:f.w,h:f.h};});
+  var pad=18,gs=18,pts=[];
+  for(var y=room.y0+pad;y<room.y1-pad;y+=gs)for(var x=room.x0+pad;x<room.x1-pad;x+=gs)pts.push([x,y]);
+  var T=new Float64Array(pts.length),i=0,mx=-1e9;
+  setStat('本物のアフォーダンスモデルで traffic 場を計算中… 0/'+pts.length);
+  (function chunk(){
+   var c0=performance.now();
+   while(i<pts.length&&performance.now()-c0<45){T[i]=aff.logProb(buildCropAff(pts[i][0],pts[i][1]),[0,0]);if(T[i]>mx)mx=T[i];i++;}
+   if(i<pts.length){setStat('本物のアフォーダンスモデルで traffic 場を計算中… '+i+'/'+pts.length);setTimeout(chunk,0);return;}
+   var sum=0,k;for(k=0;k<T.length;k++){T[k]=Math.exp(T[k]-mx);sum+=T[k];}for(k=0;k<T.length;k++)T[k]/=sum;
+   setStat('CEM で配置を最適化中…');setTimeout(function(){runCEM(sizes,pts,T);},0);
+  })();
+ }
+ document.getElementById('sim-opt').onclick=optimizeLayout;
  // init: surrogate preview immediately, then load real weights
  preview();
  fetch('webdemo/stepflow.json').then(function(r){if(!r.ok)throw 0;return r.json();})
   .then(function(j){model=new StepFlow(j);computeReal();})
   .catch(function(){setStat('モデル重みを読み込めませんでした（代理プレビュー表示中）');});
+ fetch('webdemo/affordance.json').then(function(r){if(!r.ok)throw 0;return r.json();})
+  .then(function(j){aff=new AffordanceFlow(j);}).catch(function(){});
 })();
 </script>
 </section>

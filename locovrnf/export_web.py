@@ -19,7 +19,7 @@ import torch
 from locovrnf import config as C
 from locovrnf import dataio as D
 from locovrnf import traj as T
-from locovrnf.model import StepFlow
+from locovrnf.model import AffordanceFlow, StepFlow
 
 WEB = C.ROOT / "webdemo"
 EPOCHS = 18
@@ -94,6 +94,41 @@ def main():
                    "step": step.tolist()})
     (WEB / "testvecs.json").write_text(json.dumps(tv))
     print("wrote", WEB / "testvecs.json", f"({len(tv)} vectors)")
+
+    export_affordance(dev, rng)
+
+
+def export_affordance(dev, rng):
+    """Export the C1 affordance flow p(visit offset | crop) + log_prob test vecs."""
+    ck = C.RESULTS / "ckpt" / "affordance.pt"
+    if not ck.exists():
+        print("no affordance.pt; skip affordance export"); return
+    model = AffordanceFlow().to(dev)
+    model.load_state_dict(torch.load(ck, map_location=dev)["state_dict"]); model.eval()
+    cnn = model.cnn.net
+    out = {"config": {"CROP_PX": C.CROP_PX, "CROP_M": C.CROP_M, "MAP_MIN": C.MAP_MIN,
+                      "M_PER_PX": C.M_PER_PX, "bins": 8, "bound": 5.0, "slope": 1e-3, "passes": 2},
+           "cnn": {"conv": [{"w": b64(cnn[i].weight.detach().cpu().numpy()),
+                             "b": b64(cnn[i].bias.detach().cpu().numpy()),
+                             "shape": list(cnn[i].weight.shape)} for i in (0, 2, 4)],
+                   "lin": lin(cnn[7])},
+           "transforms": [[masked_lin(tr.hyper[0]), masked_lin(tr.hyper[2]), masked_lin(tr.hyper[4])]
+                          for tr in model.flow.transform.transforms]}
+    (WEB / "affordance.json").write_text(json.dumps(out))
+    print("wrote", WEB / "affordance.json", f"({(WEB/'affordance.json').stat().st_size/1024:.0f} KB)")
+
+    # log_prob test vectors at offset 0 (what the traffic field uses)
+    tv = []
+    for _ in range(40):
+        crop = (rng.random((C.CROP_PX, C.CROP_PX)) < 0.2).astype(np.float32)
+        x = rng.standard_normal((1, 2)).astype(np.float32) * 0.4
+        with torch.no_grad():
+            lp = float(model.log_prob(torch.tensor(crop[None], device=dev),
+                                      torch.tensor(x, device=dev))[0])
+        tv.append({"crop": base64.b64encode(crop.astype(np.uint8).tobytes()).decode(),
+                   "x": x[0].tolist(), "logp": lp})
+    (WEB / "aff_testvecs.json").write_text(json.dumps(tv))
+    print("wrote", WEB / "aff_testvecs.json", f"({len(tv)} vectors)")
 
 
 if __name__ == "__main__":

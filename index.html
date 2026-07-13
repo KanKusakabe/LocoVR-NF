@@ -16,6 +16,7 @@
 </style></head><body>
 <h1>LocoVR-NF — 実住宅の導線尤度で「家具配置」を採点し、再設計をシミュレートする</h1>
 <p class="sub"><b>実データ</b> LocoVR / LocoReal(ICLR 2025・MIT。実人間の目的志向歩行 × 実住宅)で、<a href="https://kankusakabe.github.io/Layout-NF/">Layout-NF</a>(TRUMANS 合成室)の主張を置き換え・拡張。<code>p(居場所 ｜ 局所占有)</code> と <code>p(経路 ｜ レイアウト,start,goal)</code> を条件付き Normalizing Flow で学習し、<b>厳密尤度を設計の目的関数にする</b>。</p>
+<p class="lead" style="border-left:3px solid #7c3aed"><b>▶ 多層NF拡張(2026-07-13)</b>:この環境層 <code>p(居場所｜占有)</code> と行動層 <code>p(次歩｜goal)</code> を<b>同じ空間で縦に積む</b>2トラック(積フィルタ / 粗→細階層)を追加しました。<b><a href="./multilayer.html">→ 多層NFのページを見る</a></b>(未知レイアウトで後付け環境層が家具重なり23%減、C3で失敗した大域経路識別を粗フロー尤度が回復=実経路上位 16%→82%)。</p>
 <div class="kpis">
 <div class="kpi"><b>99.8%</b>C0 実軌跡が非占有セル上(座標整合・1=完全)</div>
 <div class="kpi"><b>0.77</b>C1 実家具 vs free 検出 AUC(0.5=偶然/1=完璧)</div>

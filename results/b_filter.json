@@ -1,0 +1,43 @@
+{
+  "holdout_layout": 3,
+  "k_routes": 32,
+  "agent_val_nll": -3.712,
+  "beta_sweep": {
+    "0.0": {
+      "minADE_m": 0.541,
+      "furniture_overlap": 0.3698,
+      "success_rate": 0.797
+    },
+    "1.0": {
+      "minADE_m": 0.522,
+      "furniture_overlap": 0.3532,
+      "success_rate": 0.839
+    },
+    "2.0": {
+      "minADE_m": 0.488,
+      "furniture_overlap": 0.3215,
+      "success_rate": 0.8
+    },
+    "4.0": {
+      "minADE_m": 0.497,
+      "furniture_overlap": 0.2851,
+      "success_rate": 0.737
+    }
+  },
+  "beta0_no_environment": {
+    "minADE_m": 0.541,
+    "furniture_overlap": 0.3698,
+    "success_rate": 0.797
+  },
+  "best_beta": 4.0,
+  "best": {
+    "minADE_m": 0.497,
+    "furniture_overlap": 0.2851,
+    "success_rate": 0.737
+  },
+  "gate_B0_reaches_goal": true,
+  "gate_B1_env_lowers_overlap": true,
+  "gate_B2_modular_overlay": true,
+  "note": "beta=0 is a pure goal-seeking agent with no obstacle awareness; beta>0 adds the separately-trained affordance density as an inference-time overlay. Claims are on overlap+minADE, not per-step logp.",
+  "gate_pass": true
+}

@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="ja"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>多層NF · 同じ空間に「環境の層」と「行動の層」を積む</title>
+<style>
+ body{font:16px/1.75 -apple-system,"Hiragino Sans","Noto Sans JP",sans-serif;max-width:960px;margin:2rem auto;padding:0 1rem;color:#222}
+ h1{line-height:1.35;margin-bottom:.2rem} h2{margin-top:.2rem} .sub{color:#666}
+ .kpis{display:flex;gap:1rem;flex-wrap:wrap;margin:1.4rem 0}
+ .kpi{background:#f5f3f0;border-radius:12px;padding:1rem 1.3rem;min-width:150px;flex:1} .kpi b{display:block;font-size:1.55rem;color:#7c3aed}
+ .kpi.teal b{color:#0d9488}
+ section{margin:2.3rem 0} img{width:100%;border:1px solid #e5e5e5;border-radius:10px}
+ .obs{color:#333;margin:.5rem 0 .2rem}
+ .so{color:#444;background:#faf8f5;border-left:3px solid #7c3aed;padding:.6rem .9rem;border-radius:0 8px 8px 0}
+ .so.teal{border-left-color:#0d9488}
+ code{background:#f0eee9;padding:.1rem .3rem;border-radius:4px} .lead{background:#f7f5f2;border-radius:12px;padding:1rem 1.2rem}
+ .warn{background:#fff7ed;border-left:3px solid #ea9a4f}
+ table{border-collapse:collapse;width:100%;margin:.6rem 0;font-size:.92rem}
+ th,td{border:1px solid #e5e5e5;padding:.4rem .6rem;text-align:left} th{background:#f5f3f0}
+ .pass{color:#0d9488;font-weight:700} .warnmark{color:#c2410c;font-weight:700}
+ ul{margin:.3rem 0} .tag{display:inline-block;background:#efe9fb;color:#6d28d9;border-radius:6px;padding:.05rem .5rem;font-size:.8rem;margin-left:.3rem}
+ .tag.teal{background:#e0f2f1;color:#0f766e}
+</style></head><body>
+
+<h1>多層NF — 同じ空間に「環境の層」と「行動の層」を積む</h1>
+<p class="sub"><b>親</b> <a href="./index.html">LocoVR-NF</a>(実住宅の導線尤度で家具配置を採点・再設計)の2フローを、<b>横並びから縦積み</b>へ。「配置・デザインを決めるNF」と「実際に人がどう動くかのNF」を<b>別々に保ちつつ、同じ座標空間で合成</b>すると、単層NFには出せない出力が得られるかを検証する。</p>
+
+<div class="kpis">
+<div class="kpi"><b>23%減</b>B2 未知レイアウトで後付け環境層が下げた家具重なり(0.370→0.285・小さいほど良い)</div>
+<div class="kpi teal"><b>82%</b>H2 粗フロー尤度が実迂回を直線より上位にした割合(per-stepは16%・4分割LOO平均)</div>
+<div class="kpi"><b>0</b>新規データ収集(既存の学習済みフロー2つを合成するだけ)</div>
+</div>
+
+<p class="lead"><b>要旨</b>:LocoVR-NF は同じ空間の上に、性質の違う2つのNFを<b>別々に</b>持っていた——<b>環境層</b> <code>p(居場所｜占有)</code>(レイアウトが決める foot-traffic 場)と、<b>行動層</b> <code>p(次ステップ｜goal)</code>(実際の歩き方)。本ページはこの2つを<b>縦に積む</b>2つのやり方を検証する。<b>トラックB(積)</b>=各ステップで行動層が提案し環境層が再重み付けするパーティクルフィルタ。<b>未知レイアウトで、後付けの環境層が家具重なりを23%下げる</b>(層を再学習せず推論時に合成するだけ=モジュール性)。<b>トラック粗→細(階層)</b>=大域ウェイポイント計画のフローの下に局所ステップのフローを積む。<b>C3で per-step 尤度が失敗した「実迂回 vs 家具貫通の直線」の判別を、粗フローの経路尤度が回復</b>(実経路を上位にする割合が 16%→82%、全4レイアウトで反転)。各図に<b>観察</b>と<b>解釈</b>を併記し、効かなかった点(粗→細は明示clearanceの手製コントローラを超えない)も正直に記す。</p>
+
+<section><h2>なぜ「多層」か:材料はもう手元にあった</h2>
+<p class="obs"><b>観察</b>:LocoVR-NF は同じ座標空間に2つのNFを別々に学習済み。<b>環境層 E</b> <code>AffordanceFlow=p(居場所｜占有)</code> はレイアウトが決める「人が湧く場」を、<b>行動層 U</b> <code>StepFlow=p(次ステップ｜占有,goal,速度)</code> は実際の経路の引かれ方を表す。ただし E は<b>位置</b>の密度、U は<b>変位</b>の密度で、素朴には掛け算できない。</p>
+<p class="so"><b>だから何が言えるか</b>:多層化の本質は「結合層を深くする(表現力)」ではなく、<b>意味の違う層を分けて合成する</b>こと。位置 vs 変位の非対称の解き方が2トラックを分ける——<b>B</b>は各ステップで積を取るフィルタ、<b>粗→細</b>はスケールで縦に分ける。</p></section>
+
+<section><h2>トラックB · 積 = 各ステップのパーティクルフィルタ<span class="tag">横のモジュール性</span></h2>
+<img src="results/b_filter.png" alt="track B particle filter">
+<p class="obs"><b>観察</b>:エージェント(StepFlow)が各ステップで候補を<b>提案</b>し、環境専門家(AffordanceFlow)が各着地点を <code>weight ∝ exp(進捗/τ + β·logp_E)</code> で<b>再重み付け</b>する。エージェント・環境とも<b>未知レイアウト3を除く3配置で学習</b>し、<b>手製の clearance 場は使わない</b>。(左)β を上げると家具重なり(橙)が <b>0.370→0.285 と単調に下がり</b>、minADE(青)も悪化しない。(中)β=0 は環境を見ないので経路(灰)が<b>家具島を突っ切る</b>(重なり0.393)。(右)β=4 は環境層が経路を歩行域へ寄せ(重なり0.316、実経路=青)、<b>未知レイアウトで再ルーティング</b>する。</p>
+<table>
+<tr><th>β(環境結合)</th><th>minADE [m] ↓</th><th>家具重なり ↓</th><th>到達成功率 ↑</th></tr>
+<tr><td>0(環境なし)</td><td>0.541</td><td>0.370</td><td>0.797</td></tr>
+<tr><td>1</td><td>0.522</td><td>0.353</td><td>0.839</td></tr>
+<tr><td>2</td><td>0.488</td><td>0.322</td><td>0.800</td></tr>
+<tr><td>4</td><td>0.497</td><td><b>0.285</b></td><td>0.737</td></tr>
+</table>
+<p class="so"><b>だから何が言えるか</b>:環境密度は<b>占有条件付き</b>なので、<b>一度学習すれば未知レイアウトの占有を入れるだけ</b>で新しい家具を避ける。<b>エージェントを一切再学習せず、推論時のオーバーレイだけで動線を引き直せた</b>(B2:未知レイアウトで重なり23%減)=あなたが描いた「同じ空間に別のNFを重ねる」を実現。到達成功率は 0.74–0.84 で保たれる(高βでやや低下=環境を重んじるほど遠回りになる、正直な傾向)。主張は生成の重なり・minADE に置き、per-step 尤度では主張しない。</p></section>
+
+<section><h2>トラック粗→細 · 大域intent flow → 局所dynamics flow<span class="tag teal">縦の大域/局所分離</span></h2>
+<img src="results/h_coarse.png" alt="track H coarse to fine">
+<p class="obs"><b>観察</b>:スケールの違う2フローを縦積み。<b>粗</b>フロー <code>p(次ウェイポイントへのオフセット｜占有,goal)</code> が大域計画を、<b>細</b>フロー(既存StepFlow)がウェイポイント間を歩く。ウェイポイント=実軌跡の転回点。(左)粗計画(赤)が中央家具島の回り込みを大域的に決め、細充填(青緑)がその間を埋める(実=青)。(中)route error:骨格 0.04m、粗→細 0.61m、直線 0.76m、手製コントローラ 0.45m。(右)<b>H2 の核心</b>——<b>per-step 尤度</b>では実経路(青)が直線(灰)より低い(C3の再現)が、<b>粗フロー尤度</b>では実経路が直線をはっきり上回る。</p>
+<table>
+<tr><th>指標(4分割 LOO 平均)</th><th>値</th><th>判定</th></tr>
+<tr><td>H0 · ウェイポイント骨格 ADE [m] ↓(vs 直線 0.89)</td><td>0.047</td><td class="pass">✅ 直線を下回る</td></tr>
+<tr><td>H1 · 粗→細 minADE [m] ↓(vs 直線 0.89)</td><td>0.682</td><td class="pass">✅ 直線を下回る</td></tr>
+<tr><td>H1補足 · 手製コントローラ minADE [m]</td><td>0.547</td><td class="warnmark">⚠ 粗→細は未達(明記)</td></tr>
+<tr><td>H2 · <b>粗</b>尤度で実経路が上位の割合 ↑</td><td><b>0.82</b></td><td class="pass">✅ 大域識別を回復</td></tr>
+<tr><td>H2対照 · <b>per-step</b>尤度で実経路が上位の割合</td><td>0.16</td><td>—(局所は失敗=C3)</td></tr>
+</table>
+<p class="so teal"><b>だから何が言えるか</b>:<code>A1/A2/C3</code> で3回躓いた「<b>局所per-step尤度は大域導線を測れない</b>」(C3では直線の方がper-step尤度が高かった)を、<b>粗フローの経路尤度が構造で回復</b>した。per-step は実迂回を16%しか上位にしないが、粗フローは82%上位にする——しかも<b>全4レイアウトで一貫して反転</b>(各分割 0.68–0.88)。これは per-step 密度には原理的に出せない大域出力。</p>
+<p class="obs warn" style="margin-top:.8rem"><b>正直な未達(H1補足)</b>:粗→細の生成は直線基線を超えるが、<b>明示的な clearance 判定を持つ手製コントローラ(minADE 0.55m)には届かない</b>(粗→細 0.68m)。細の脚は硬い障害物テストを持たないため角を切り、家具重なりも手製より多い。Track H の固有貢献は<b>手製プランナの出し抜きではなく H2(大域識別)</b>——ここは gate に boolean で残し隠さない。</p></section>
+
+<section><h2>X1 · 2つの多層アーキテクチャを同じ空間で並べる</h2>
+<img src="results/x_compare.png" alt="X1 comparison">
+<p class="obs"><b>観察</b>:未知レイアウト3で6手法の route error と家具重なりを比較(左・中)。生成分布の質は B(agent×env)と 粗→細 で同程度、いずれも直線を下回り、明示clearanceを持つ手製系(C3・H hand ctrl)がやや低い。(右)各トラックが足す<b>固有能力</b>:<b>B2</b>=未知レイアウトで環境層を推論時に重ねて重なり 0.370→0.285、<b>H2</b>=粗尤度が実経路を 0.88 の割合で上位(per-step は 0.12)。</p>
+<p class="so"><b>だから何が言えるか</b>:2トラックは同等の経路分布を生むが、<b>Bは推論時の層差替(モジュール性)、Hは大域経路識別</b>という別々の能力を足す=<b>相補的</b>。粗フローの下層(細)に積Bの環境専門家を差せば、<b>縦(大域/局所)×横(環境×行動)</b>の三層になる(X2=次段)。「勝ち負け」ではなく<b>能力の差</b>で並べるのが本研究の要点。</p></section>
+
+<section><h2>正直な制約(既存の教訓を先に踏まない)</h2>
+<ul>
+<li><b>局所尤度 ≠ 大域導線</b>(<code>A1/A2/C3</code>)。B・H とも経路品質の主張は<b>生成分布の minADE と家具重なり率</b>のみ。per-step 尤度ランキングでは主張せず、H2 はむしろ「per-step が失敗する」ことを対照に使う。</li>
+<li><b>位置 vs 変位の非対称</b>。素朴な密度積は不可 → B は各ステップの重点リサンプリング(フィルタ)で回避。</li>
+<li><b>識別性(leak-free)</b>。B の環境専門家・エージェントはともに<b>未知レイアウトを除外</b>して学習。H は 4 レイアウトの leave-one-layout-out。</li>
+<li><b>粗→細は手製clearanceを超えない</b>(H1補足)。固有貢献は H2。</li>
+</ul></section>
+
+<section><h2>再現</h2>
+<p class="obs"><code>cd LocoVR-NF &amp;&amp; export PYTHONPATH="$PWD"</code></p>
+<ul>
+<li><code>uv run --no-project python -m locovrnf.filter --holdout 3</code> — B0/B1/B2(~7分)</li>
+<li><code>uv run --no-project python -m locovrnf.coarse --holdout 3 --loo</code> — H0/H1/H2/H3(~7分)</li>
+<li><code>uv run --no-project python -m locovrnf.compare</code> — X1</li>
+</ul>
+<p class="sub">詳細は <a href="./MULTILAYER.md">MULTILAYER.md</a>、設計の元文書は <code>../future-plan/multilayer-nf-experiment-plan.md</code>。親プロジェクト = <a href="./index.html">LocoVR-NF</a>。</p></section>
+
+</body></html>

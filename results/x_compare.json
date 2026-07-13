@@ -1,0 +1,48 @@
+{
+  "holdout_layout": 3,
+  "rows": [
+    {
+      "method": "single flow + hand controller (C3)",
+      "minADE_m": 0.387,
+      "furniture_overlap": 0.0879
+    },
+    {
+      "method": "Track B · agent only (β=0)",
+      "minADE_m": 0.541,
+      "furniture_overlap": 0.3698
+    },
+    {
+      "method": "Track B · agent × environment (β=4.0)",
+      "minADE_m": 0.497,
+      "furniture_overlap": 0.2851
+    },
+    {
+      "method": "Track H · coarse→fine",
+      "minADE_m": 0.615,
+      "furniture_overlap": 0.254
+    },
+    {
+      "method": "Track H · hand controller (ref)",
+      "minADE_m": 0.446,
+      "furniture_overlap": 0.0851
+    },
+    {
+      "method": "straight line",
+      "minADE_m": 0.757,
+      "furniture_overlap": null
+    }
+  ],
+  "capability_B2_modular_overlay": {
+    "claim": "environment density trained on other layouts, composed at inference, lowers overlap on the unseen layout",
+    "overlap_no_env": 0.3698,
+    "overlap_with_env": 0.2851,
+    "gate_pass": true
+  },
+  "capability_H2_global_routing": {
+    "claim": "coarse-flow likelihood ranks the real detour above a straight line, reversing the per-step density",
+    "coarse_real_higher_frac": 0.88,
+    "stepwise_real_higher_frac": 0.12,
+    "gate_pass": true
+  },
+  "summary": "Both tracks produce comparable route distributions; each adds a capability a single flow lacks -- B: inference-time layer swap, H: global route discrimination. They are complementary (a coarse plan whose fine steps use the product-B environment expert = X2)."
+}
